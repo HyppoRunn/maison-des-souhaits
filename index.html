@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>La Maison des Souhaits</title>
+<meta name="description" content="La liste de Noël de la famille : un souhait par cadeau, au pied du sapin.">
+<meta name="theme-color" content="#0c0807">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='10' y='24' width='44' height='34' rx='3' fill='%239e1622'/%3E%3Crect x='6' y='18' width='52' height='10' rx='2' fill='%23b81c2a'/%3E%3Crect x='28' y='18' width='8' height='40' fill='%23d9b25e'/%3E%3Cpath d='M32 18c-8-12-20-6-12 0zM32 18c8-12 20-6 12 0z' fill='%23d9b25e'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Caveat:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+<link rel="preload" as="image" href="assets/salon.jpg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>La Maison des Souhaits</h1>
+    <p class="count" id="count" aria-live="polite"></p>
+  </header>
+
+  <div class="stage-scroll" id="scroller">
+    <div class="stage" id="stage">
+      <img class="scene" src="assets/salon.jpg" alt="Salon de Noël la nuit : grand sapin illuminé, cheminée allumée, fenêtre enneigée, et des cadeaux disposés en arc au pied du sapin." width="2000" height="1200">
+      <div class="fx" aria-hidden="true">
+        <div class="fire"></div>
+        <canvas class="snow" id="snow" width="276" height="376"></canvas>
+        <div id="twinkles"></div>
+      </div>
+      <div class="hits" id="hits"></div>
+
+      <!-- Code familial -->
+      <div class="overlay" id="gate" hidden>
+        <form class="card" id="gate-form" novalidate>
+          <h2>Bienvenue</h2>
+          <p>Entrez le code familial pour accrocher vos souhaits au pied du sapin.</p>
+          <label for="gate-code">Code familial<input id="gate-code" autocomplete="current-password" type="password" required></label>
+          <p class="err" id="gate-err" role="alert"></p>
+          <div class="row"><button type="submit" class="primary">Entrer</button></div>
+        </form>
+      </div>
+
+      <!-- Ajouter / modifier un souhait -->
+      <div class="overlay" id="modal" hidden>
+        <form class="card" id="wish" novalidate>
+          <h2 id="wish-title">Mon souhait</h2>
+          <p id="wish-sub">Il sera accroché à ce cadeau pour toute la famille.</p>
+          <label for="who">Ton prénom<input id="who" class="hand" autocomplete="given-name" maxlength="40" placeholder="Lucie" required></label>
+          <label for="what">Le cadeau<input id="what" class="hand" maxlength="120" placeholder="AirPods 4" required></label>
+          <label for="url">Lien vers l'article<input id="url" type="url" inputmode="url" maxlength="2000" placeholder="https://…"></label>
+          <p class="err" id="wish-err" role="alert"></p>
+          <div class="row">
+            <button type="button" class="danger" id="free" hidden>Libérer ce cadeau</button>
+            <span class="spacer"></span>
+            <button type="button" id="cancel">Annuler</button>
+            <button type="submit" class="primary" id="save">Terminer</button>
+          </div>
+          <div class="confirm" id="confirm" hidden>
+            <span>Retirer ce souhait du sapin ?</span>
+            <button type="button" id="confirm-no">Non</button>
+            <button type="button" class="danger-solid" id="confirm-yes">Oui, libérer</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Détail d'un souhait (écrans tactiles) -->
+      <div class="overlay" id="detail" hidden>
+        <div class="card detail" role="dialog" aria-modal="true" aria-labelledby="d-what">
+          <span class="d-who" id="d-who"></span>
+          <h2 id="d-what"></h2>
+          <a class="primary btn" id="d-link" target="_blank" rel="noopener">Voir l'article ↗</a>
+          <p class="muted" id="d-nolink" hidden>Pas de lien pour ce souhait.</p>
+          <div class="row"><button type="button" id="d-edit">Modifier</button><span class="spacer"></span><button type="button" id="d-close">Fermer</button></div>
+        </div>
+      </div>
+
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    </div>
+  </div>
+
+  <footer class="foot">
+    <p id="mode-note"></p>
+    <button type="button" class="linkish" id="logout" hidden>Changer de code</button>
+  </footer>
+</div>
+<script src="config.js"></script>
+<script src="assets/scene.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
