@@ -107,3 +107,29 @@ h1{font-family:var(--f-display);font-weight:500;font-style:italic;font-size:clam
 body{padding-bottom:max(16px, env(safe-area-inset-bottom, 0px))}
 .top{margin-bottom:10px}
 .foot{margin-top:10px}
+
+/* Full-screen scene on computers: no black bands, no scrolling.
+   The image covers the window (slight crop, biased to keep the star and the gifts). */
+.layer{position:absolute;inset:0}
+@media (min-width:821px) and (min-aspect-ratio:4/3){
+  body{padding:0}
+  .wrap{max-width:none;height:100vh;height:100svh;position:relative;overflow:hidden}
+  .stage-scroll{height:100%;border-radius:0;box-shadow:none;overflow:hidden}
+  .stage{min-width:0;aspect-ratio:auto;height:100%;container-type:size}
+  /* Very wide screens: fill the sides with a blurred, darkened copy of the room */
+  .stage::before{content:"";position:absolute;inset:-60px;background:url("assets/salon.jpg") center/cover;filter:blur(40px) brightness(.45)}
+  /* Cover the window, but never crop more than 10% of the height (keeps the star and the gifts) */
+  .layer{--H:min(max(100cqh, calc(100cqw * 3 / 5)), calc(100cqh * 1.1));inset:auto;
+    height:var(--H);width:calc(var(--H) * 5 / 3);
+    left:calc((100cqw - var(--H) * 5 / 3) / 2);
+    top:calc((100cqh - var(--H)) * .35)}
+  .top{position:absolute;z-index:5;top:0;left:0;right:0;margin:0;pointer-events:none;
+    padding:max(16px, env(safe-area-inset-top, 0px)) max(28px, env(safe-area-inset-right, 0px)) 44px max(28px, env(safe-area-inset-left, 0px));
+    background:linear-gradient(rgba(8,5,3,.62),rgba(8,5,3,0))}
+  .top h1,.top .count{text-shadow:0 2px 12px rgba(0,0,0,.7)}
+  .top .count{color:var(--ink)}
+  .foot{position:absolute;z-index:5;left:0;right:0;bottom:0;margin:0;pointer-events:none;
+    padding:28px max(28px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(28px, env(safe-area-inset-left, 0px));
+    background:linear-gradient(rgba(8,5,3,0),rgba(8,5,3,.55));color:rgba(243,231,210,.75);text-shadow:0 1px 6px rgba(0,0,0,.8)}
+  .foot .linkish{pointer-events:auto;color:rgba(243,231,210,.85)}
+}
