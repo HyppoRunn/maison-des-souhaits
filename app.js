@@ -92,9 +92,11 @@
     hits.textContent = "";
     const total = SCENE.gifts.length;
     let taken = 0;
+    // Tags keep the same size relative to the gifts whatever the scene width
+    const k = Math.min(1, Math.max(0.6, ($("hits").clientWidth || 1300) / 1300));
     SCENE.gifts.forEach((g, i) => {
       const w = wishes[i];
-      const sz = Math.min(1, Math.max(0.55, g.w / 7.5));
+      const sz = Math.min(1, Math.max(0.55, g.w / 7.5)) * k;
       const ax = ((g.ax - g.x) / g.w) * 100 + "%";
       const ky = ((g.ay + 2.2 - g.y) / g.h) * 100;
 
@@ -144,7 +146,86 @@
       hits.append(slot);
     });
     const free = total - taken;
-    $("count").textContent = `${taken} souhait${taken > 1 ? "s" : ""} · ${free} cadeau${free > 1 ? "x" : ""} libre${free > 1 ? "s" : ""}`;
+    const all = Object.keys(wishes).length, extra = all - taken;
+    $("count").textContent = `${all} souhait${all > 1 ? "s" : ""} · ` +
+      (free ? `${free} libre${free > 1 ? "s" : ""}` : "sapin complet");
+    $("sack").hidden = extra < 1;
+    $("sack-tag").textContent = `+${extra} souhait${extra > 1 ? "s" : ""}`;
+    if (flashSlot !== null) {
+      const el = $("hits").children[flashSlot];
+      if (el) { el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 3400); }
+      flashSlot = null;
+    }
+    if (!$("list").hidden) renderList();
+  }
+
+  /* ---------------- Free slot, list view ---------------- */
+  const MAX_SLOT = 199;
+  let flashSlot = null;
+  function firstFreeSlot() {
+    for (let i = 0; i <= MAX_SLOT; i++) if (!wishes[i]) return i;
+    return -1;
+  }
+  const isOverflow = (i) => i >= SCENE.gifts.length;
+
+  function renderList() {
+    const body = $("list-body");
+    body.textContent = "";
+    const entries = Object.entries(wishes).map(([slot, w]) => ({ slot: +slot, ...w }));
+    const n = entries.length;
+    $("list-sub").textContent = n
+      ? `${n} souhait${n > 1 ? "s" : ""}, classés par prénom.`
+      : "";
+    if (!n) {
+      const p = document.createElement("p"); p.className = "list-empty";
+      p.textContent = "Aucun souhait pour l'instant. Clique sur un cadeau au pied du sapin, ou sur « Ajouter un souhait ».";
+      body.append(p); return;
+    }
+    const groups = new Map();
+    for (const e of entries) {
+      const key = e.who.trim().toLocaleLowerCase("fr");
+      if (!groups.has(key)) groups.set(key, { name: e.who.trim(), items: [] });
+      groups.get(key).items.push(e);
+    }
+    [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" })).forEach((g) => {
+      const sec = document.createElement("section"); sec.className = "person";
+      const h = document.createElement("h3"); h.textContent = g.name;
+      const c = document.createElement("small"); c.textContent = `${g.items.length} souhait${g.items.length > 1 ? "s" : ""}`;
+      h.append(c);
+      const ul = document.createElement("ul");
+      g.items.sort((a, b) => a.slot - b.slot).forEach((e) => {
+        const li = document.createElement("li");
+        const item = document.createElement("span"); item.className = "item"; item.textContent = e.what;
+        const where = document.createElement("span"); where.className = "where";
+        where.textContent = isOverflow(e.slot) ? "Dans la hotte" : "Sous le sapin";
+        item.append(where);
+        li.append(item);
+        const url = safeUrl(e.url);
+        if (url) {
+          const a = document.createElement("a"); a.className = "go"; a.href = url; a.target = "_blank"; a.rel = "noopener";
+          a.textContent = "Voir ↗"; a.setAttribute("aria-label", `Voir l'article : ${e.what}`);
+          li.append(a);
+        }
+        const ed = document.createElement("button"); ed.type = "button"; ed.className = "ed"; ed.innerHTML = PENCIL;
+        ed.setAttribute("aria-label", `Modifier : ${e.what}`);
+        ed.addEventListener("click", () => openEdit(e.slot, "list"));
+        li.append(ed);
+        ul.append(li);
+      });
+      sec.append(h, ul);
+      body.append(sec);
+    });
+  }
+  function openList() {
+    if (!DEMO && !code) return showGate();
+    renderList();
+    openOverlay("list", $("list-close"));
+  }
+  function openAddAnywhere(from) {
+    if (!DEMO && !code) return showGate();
+    const i = firstFreeSlot();
+    if (i < 0) { toast("Le sapin et la hotte sont pleins. Libère un souhait pour en ajouter un.", true); return; }
+    openAdd(i, from);
   }
 
   async function refresh(quiet) {
@@ -162,11 +243,13 @@
   let lastFocus = null;
   function openOverlay(id, focusEl) {
     lastFocus = document.activeElement;
-    for (const o of ["gate", "modal", "detail"]) $(o).hidden = o !== id;
+    for (const o of ["gate", "modal", "detail", "list"]) $(o).hidden = o !== id;
     if (focusEl) setTimeout(() => focusEl.focus(), 30);
   }
+  let returnTo = null;
   function closeOverlays() {
-    $("modal").hidden = true; $("detail").hidden = true;
+    $("modal").hidden = true; $("detail").hidden = true; $("list").hidden = true;
+    if (returnTo === "list") { returnTo = null; openList(); return; }
     if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
   }
 
@@ -176,18 +259,20 @@
   function resetForm() {
     form.reset(); $("wish-err").textContent = ""; $("confirm").hidden = true; $("save").disabled = false;
   }
-  function openAdd(i) {
+  function openAdd(i, from) {
     if (!DEMO && !code) return showGate();
-    mode = "add"; cur = i; resetForm();
+    mode = "add"; cur = i; resetForm(); returnTo = from || null;
     $("wish-title").textContent = "Mon souhait";
-    $("wish-sub").textContent = "Il sera accroché à ce cadeau pour toute la famille.";
+    $("wish-sub").textContent = isOverflow(i)
+      ? "Tous les cadeaux du sapin sont pris : ce souhait ira dans la hotte, près de la cheminée."
+      : "Il sera accroché à ce cadeau pour toute la famille.";
     $("free").hidden = true; $("save").textContent = "Terminer";
     const last = store.get("mds-name"); if (last) form.who.value = last;
     openOverlay("modal", last ? form.what : form.who);
   }
-  function openEdit(i) {
+  function openEdit(i, from) {
     const w = wishes[i]; if (!w) return;
-    mode = "edit"; cur = i; resetForm();
+    mode = "edit"; cur = i; resetForm(); returnTo = from || null;
     $("wish-title").textContent = "Modifier le souhait";
     $("wish-sub").textContent = "Les changements sont visibles par toute la famille.";
     form.who.value = w.who; form.what.value = w.what; form.url.value = w.url || "";
@@ -215,12 +300,13 @@
       if (mode === "add") await api.add(cur, { who, what, url });
       else await api.update(cur, { who, what, url });
       store.set("mds-name", who);
+      if (mode === "add" && !isOverflow(cur) && returnTo !== "list") flashSlot = cur;
       closeOverlays();
       toast(mode === "add" ? "Souhait accroché au sapin" : "Souhait modifié");
       await refresh(true);
     } catch (err) {
       $("save").disabled = false;
-      if (err.kind === "taken") { closeOverlays(); toast("Quelqu'un vient de prendre ce cadeau. Choisis-en un autre.", true); refresh(true); }
+      if (err.kind === "taken") { returnTo = null; closeOverlays(); toast("Quelqu'un vient de prendre ce cadeau. Choisis-en un autre.", true); refresh(true); }
       else if (err.kind === "gone") { closeOverlays(); toast("Ce souhait a été retiré entre-temps.", true); refresh(true); }
       else if (err.kind === "code") { logout(); showGate("Le code familial a changé. Entre le nouveau code."); }
       else $("wish-err").textContent = "Impossible d'enregistrer. Vérifie ta connexion et réessaie.";
@@ -239,8 +325,17 @@
   });
   $("d-close").addEventListener("click", closeOverlays);
   $("d-edit").addEventListener("click", () => openEdit(cur));
-  for (const id of ["modal", "detail"]) $(id).addEventListener("click", (e) => { if (e.target === $(id)) closeOverlays(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlays(); });
+  $("btn-list").addEventListener("click", openList);
+  $("btn-add").addEventListener("click", () => openAddAnywhere());
+  $("list-add").addEventListener("click", () => openAddAnywhere("list"));
+  $("list-close").addEventListener("click", () => { returnTo = null; closeOverlays(); });
+  $("sack").addEventListener("click", openList);
+  for (const id of ["modal", "detail", "list"]) $(id).addEventListener("click", (e) => { if (e.target === $(id)) { if (id === "list") returnTo = null; closeOverlays(); } });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!$("list").hidden) returnTo = null;
+    closeOverlays();
+  });
 
   /* ---------------- Family code ---------------- */
   function showGate(msg) {
@@ -286,15 +381,68 @@
     document.addEventListener("visibilitychange", () => { if (!document.hidden && !reduceMotion) requestAnimationFrame(draw); });
   })();
 
+  /* Burlap sack ("hotte") drawn once on its canvas, lit by the fire on its right */
+  (() => {
+    const c = $("sack-canvas"), x = c.getContext("2d"), W = c.width, H = c.height;
+    let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    // floor shadow
+    const sh = x.createRadialGradient(W / 2, H - 22, 10, W / 2, H - 22, W * 0.48);
+    sh.addColorStop(0, "rgba(0,0,0,.55)"); sh.addColorStop(1, "rgba(0,0,0,0)");
+    x.fillStyle = sh; x.beginPath(); x.ellipse(W / 2, H - 22, W * 0.48, 26, 0, 0, 7); x.fill();
+    // gifts peeking out of the opening
+    const box = (bx, by, bw, bh, a, col, rib) => {
+      x.save(); x.translate(bx, by); x.rotate(a);
+      x.fillStyle = col; x.fillRect(-bw / 2, -bh, bw, bh);
+      x.fillStyle = "rgba(0,0,0,.25)"; x.fillRect(bw / 2 - 8, -bh, 8, bh);
+      x.fillStyle = rib; x.fillRect(-6, -bh, 12, bh);
+      x.beginPath(); x.ellipse(-12, -bh - 4, 13, 7, -0.4, 0, 7); x.ellipse(12, -bh - 4, 13, 7, 0.4, 0, 7); x.fill();
+      x.restore();
+    };
+    box(140, 150, 90, 80, -0.25, "#7a1420", "#d8b25a");
+    box(225, 140, 80, 95, 0.2, "#1d4a32", "#e9dcc4");
+    box(185, 120, 60, 60, 0.05, "#d9cbb2", "#9e1622");
+    // sack body
+    const body = new Path2D();
+    body.moveTo(110, 150);
+    body.bezierCurveTo(40, 200, 20, 300, 50, 360);
+    body.quadraticCurveTo(180, 395, 310, 360);
+    body.bezierCurveTo(340, 300, 320, 200, 250, 150);
+    body.quadraticCurveTo(180, 175, 110, 150);
+    const g = x.createLinearGradient(30, 0, 330, 0);
+    g.addColorStop(0, "#4a3220"); g.addColorStop(0.45, "#8a6a44"); g.addColorStop(0.85, "#c09060"); g.addColorStop(1, "#7a5232");
+    x.fillStyle = g; x.fill(body);
+    x.save(); x.clip(body);
+    x.globalAlpha = 0.22; x.strokeStyle = "#2a1a0c"; x.lineWidth = 1;
+    for (let i = 0; i < W; i += 5) { x.beginPath(); x.moveTo(i, 140); x.lineTo(i + 8, H); x.stroke(); }
+    for (let j = 140; j < H; j += 5) { x.beginPath(); x.moveTo(0, j); x.lineTo(W, j + 3); x.stroke(); }
+    x.globalAlpha = 1;
+    for (let k = 0; k < 900; k++) { x.fillStyle = `rgba(${rnd() < 0.5 ? "255,220,170" : "40,25,10"},${0.08 + rnd() * 0.1})`; x.fillRect(rnd() * W, 140 + rnd() * 260, 2, 2); }
+    const sg = x.createRadialGradient(130, 260, 20, 160, 280, 220);
+    sg.addColorStop(0, "rgba(0,0,0,0)"); sg.addColorStop(1, "rgba(0,0,0,.45)"); x.fillStyle = sg; x.fillRect(0, 0, W, H);
+    x.restore();
+    // folds
+    x.strokeStyle = "rgba(30,18,8,.45)"; x.lineWidth = 3;
+    [[120, 175, 95, 340], [180, 180, 175, 370], [245, 175, 275, 345]].forEach(([a, b, c2, d]) => { x.beginPath(); x.moveTo(a, b); x.quadraticCurveTo((a + c2) / 2 + 12, (b + d) / 2, c2, d); x.stroke(); });
+    // rope tie
+    x.strokeStyle = "#d8b25a"; x.lineWidth = 7; x.lineCap = "round";
+    x.beginPath(); x.moveTo(108, 168); x.quadraticCurveTo(180, 190, 252, 166); x.stroke();
+    x.lineWidth = 5; x.beginPath(); x.moveTo(200, 182); x.quadraticCurveTo(215, 230, 205, 262); x.moveTo(206, 182); x.quadraticCurveTo(232, 220, 236, 250); x.stroke();
+    x.fillStyle = "#b8903a"; x.beginPath(); x.arc(203, 182, 9, 0, 7); x.fill();
+  })();
+
   /* ---------------- Start ---------------- */
   $("mode-note").textContent = DEMO
     ? "Mode démo : les souhaits restent sur cet appareil. Une fois Supabase branché, ils seront partagés avec toute la famille."
-    : "Les souhaits sont partagés avec toute la famille. Survole un cadeau pour voir le souhait, clique pour ouvrir l'article.";
+    : touchOnly
+      ? "Les souhaits sont partagés avec toute la famille. Touche un cadeau pour voir le souhait, glisse pour voir toute la pièce."
+      : "Les souhaits sont partagés avec toute la famille. Survole un cadeau pour voir le souhait, clique pour ouvrir l'article.";
   const sc = $("scroller"); sc.scrollLeft = (sc.scrollWidth - sc.clientWidth) / 2;
   render();
   if (DEMO) { refresh(); }
   else if (code) { $("logout").hidden = false; refresh(); }
   else showGate();
   setInterval(() => { if (!document.hidden) refresh(true); }, 30000);
+  let resizeTimer;
+  addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 150); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(true); });
 })();

@@ -6,6 +6,8 @@ La liste de Noël de la famille, présentée comme un salon le soir de Noël. Ch
 - Souhaits enregistrés dans [Supabase](https://supabase.com) (offre gratuite) et partagés avec toute la famille.
 - Accès protégé par un code familial, vérifié côté Supabase : il n'apparaît jamais dans le code du site.
 - Chaque souhait peut être modifié ou supprimé (« Libérer ce cadeau »).
+- « Liste des souhaits » affiche tous les souhaits classés par prénom, avec les liens.
+- « Ajouter un souhait » prend le premier cadeau libre. Quand les 24 cadeaux du sapin sont pris, les souhaits suivants vont dans une hotte près de la cheminée (jusqu'à 200 souhaits au total).
 
 Sans Supabase configuré, le site tourne en **mode démo** : les souhaits restent dans le navigateur.
 
