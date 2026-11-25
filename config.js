@@ -4,6 +4,6 @@
 // Laissées vides, le site tourne en « mode démo » : les souhaits restent
 // sur l'appareil, rien n'est partagé.
 window.MDS_CONFIG = {
-  supabaseUrl: "",
-  supabaseAnonKey: ""
+  supabaseUrl: "https://ujkkgvqgeincacttpnoc.supabase.co",
+  supabaseAnonKey: "sb_publishable_lg487NpS30h9OJPxXpz1hA_bXXocP2N"
 };
