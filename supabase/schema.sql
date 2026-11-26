@@ -25,11 +25,15 @@ create table if not exists public.wishes (
   who        text not null check (char_length(btrim(who)) between 1 and 40),
   what       text not null check (char_length(btrim(what)) between 1 and 120),
   url        text check (url is null or (char_length(url) <= 2000 and url ~* '^https?://')),
+  note       text check (note is null or char_length(note) <= 200),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 -- Aucun accès direct à la table depuis le navigateur : tout passe par les fonctions.
+-- Bases créées avant l'ajout des précisions
+alter table public.wishes add column if not exists note text check (note is null or char_length(note) <= 200);
+
 alter table public.wishes enable row level security;
 revoke all on public.wishes from anon, authenticated;
 
@@ -79,8 +83,13 @@ begin
 end;
 $$;
 
+-- Les fonctions changent de forme : on retire les anciennes versions.
+drop function if exists public.list_wishes(text);
+drop function if exists public.add_wish(text, int, text, text, text);
+drop function if exists public.update_wish(text, int, text, text, text);
+
 create or replace function public.list_wishes(p_code text)
-returns table (slot int, who text, what text, url text, updated_at timestamptz)
+returns table (slot int, who text, what text, url text, note text, updated_at timestamptz)
 language plpgsql
 security definer
 set search_path = ''
@@ -88,13 +97,13 @@ as $$
 begin
   perform private.require_code(p_code);
   return query
-    select w.slot, w.who, w.what, w.url, w.updated_at
+    select w.slot, w.who, w.what, w.url, w.note, w.updated_at
     from public.wishes w
     order by w.slot;
 end;
 $$;
 
-create or replace function public.add_wish(p_code text, p_slot int, p_who text, p_what text, p_url text)
+create or replace function public.add_wish(p_code text, p_slot int, p_who text, p_what text, p_url text, p_note text default null)
 returns void
 language plpgsql
 security definer
@@ -102,15 +111,15 @@ set search_path = ''
 as $$
 begin
   perform private.require_code(p_code);
-  insert into public.wishes (slot, who, what, url)
-  values (p_slot, btrim(p_who), btrim(p_what), private.clean_url(p_url));
+  insert into public.wishes (slot, who, what, url, note)
+  values (p_slot, btrim(p_who), btrim(p_what), private.clean_url(p_url), nullif(btrim(coalesce(p_note, '')), ''));
 exception
   when unique_violation then
     raise exception 'deja_pris' using errcode = 'P0001';
 end;
 $$;
 
-create or replace function public.update_wish(p_code text, p_slot int, p_who text, p_what text, p_url text)
+create or replace function public.update_wish(p_code text, p_slot int, p_who text, p_what text, p_url text, p_note text default null)
 returns void
 language plpgsql
 security definer
@@ -119,7 +128,8 @@ as $$
 begin
   perform private.require_code(p_code);
   update public.wishes
-     set who = btrim(p_who), what = btrim(p_what), url = private.clean_url(p_url), updated_at = now()
+     set who = btrim(p_who), what = btrim(p_what), url = private.clean_url(p_url),
+         note = nullif(btrim(coalesce(p_note, '')), ''), updated_at = now()
    where slot = p_slot;
   if not found then
     raise exception 'introuvable' using errcode = 'P0002';
@@ -142,13 +152,13 @@ $$;
 -- Seules ces cinq fonctions sont accessibles au site.
 revoke all on function public.check_family_code(text) from public;
 revoke all on function public.list_wishes(text) from public;
-revoke all on function public.add_wish(text, int, text, text, text) from public;
-revoke all on function public.update_wish(text, int, text, text, text) from public;
+revoke all on function public.add_wish(text, int, text, text, text, text) from public;
+revoke all on function public.update_wish(text, int, text, text, text, text) from public;
 revoke all on function public.delete_wish(text, int) from public;
 grant execute on function public.check_family_code(text) to anon, authenticated;
 grant execute on function public.list_wishes(text) to anon, authenticated;
-grant execute on function public.add_wish(text, int, text, text, text) to anon, authenticated;
-grant execute on function public.update_wish(text, int, text, text, text) to anon, authenticated;
+grant execute on function public.add_wish(text, int, text, text, text, text) to anon, authenticated;
+grant execute on function public.update_wish(text, int, text, text, text, text) to anon, authenticated;
 grant execute on function public.delete_wish(text, int) to anon, authenticated;
 
 -- ---------------------------------------------------------------------

@@ -44,11 +44,26 @@
   const demo = {
     load() {
       try { const d = JSON.parse(store.get("mds-demo") || "null"); if (d) return d; } catch (e) { /* ignore */ }
-      return { 17: { who: "Lucie", what: "AirPods 4", url: "https://www.apple.com/fr/airpods-4/" },
+      return { 17: { who: "Lucie", what: "AirPods 4", url: "https://www.apple.com/fr/airpods-4/", note: "Avec réduction de bruit" },
                23: { who: "Hugo", what: "LEGO Technic", url: "https://www.lego.com/fr-fr/themes/technic" } };
     },
     save(d) { store.set("mds-demo", JSON.stringify(d)); },
   };
+
+  // Sends the "précisions" field. If the database has not been updated yet
+  // (supabase/2026-11-precisions.sql not run), saves the wish without it.
+  async function withNote(fn, args, note) {
+    try {
+      await rpc(fn, { ...args, p_note: note || null });
+    } catch (e) {
+      if (e.kind === "net" && /could not find the function|PGRST202/i.test(e.message)) {
+        await rpc(fn, args);
+        if (note) setTimeout(() => toast("Souhait enregistré, mais pas les précisions : la base doit être mise à jour.", true), 50);
+        return;
+      }
+      throw e;
+    }
+  }
 
   const api = {
     async check(c) { return DEMO ? true : rpc("check_family_code", { p_code: c }); },
@@ -56,16 +71,16 @@
       if (DEMO) return demo.load();
       const rows = await rpc("list_wishes", { p_code: code });
       const out = {};
-      for (const r of rows || []) out[r.slot] = { who: r.who, what: r.what, url: r.url };
+      for (const r of rows || []) out[r.slot] = { who: r.who, what: r.what, url: r.url, note: r.note || "" };
       return out;
     },
     async add(slot, w) {
       if (DEMO) { const d = demo.load(); if (d[slot]) throw Object.assign(new Error(), { kind: "taken" }); d[slot] = w; demo.save(d); return; }
-      await rpc("add_wish", { p_code: code, p_slot: slot, p_who: w.who, p_what: w.what, p_url: w.url || null });
+      await withNote("add_wish", { p_code: code, p_slot: slot, p_who: w.who, p_what: w.what, p_url: w.url || null }, w.note);
     },
     async update(slot, w) {
       if (DEMO) { const d = demo.load(); d[slot] = w; demo.save(d); return; }
-      await rpc("update_wish", { p_code: code, p_slot: slot, p_who: w.who, p_what: w.what, p_url: w.url || null });
+      await withNote("update_wish", { p_code: code, p_slot: slot, p_who: w.who, p_what: w.what, p_url: w.url || null }, w.note);
     },
     async remove(slot) {
       if (DEMO) { const d = demo.load(); delete d[slot]; demo.save(d); return; }
@@ -122,7 +137,9 @@
         const who = document.createElement("span"); who.className = "who"; who.textContent = w.who;
         const what = document.createElement("span"); what.className = "what"; what.textContent = w.what;
         const go = document.createElement("span"); go.className = "go"; go.textContent = url ? "Voir l'article ↗" : "Sans lien";
-        tag.append(who, what, go);
+        tag.append(who, what);
+        if (w.note) { const nt = document.createElement("span"); nt.className = "note"; nt.textContent = w.note; tag.append(nt); }
+        tag.append(go);
         el.append(twine, tag);
 
         const edit = document.createElement("button");
@@ -198,6 +215,7 @@
         const item = document.createElement("span"); item.className = "item"; item.textContent = e.what;
         const where = document.createElement("span"); where.className = "where";
         where.textContent = isOverflow(e.slot) ? "Dans la hotte" : "Sous le sapin";
+        if (e.note) { const nt = document.createElement("span"); nt.className = "note"; nt.textContent = e.note; item.append(nt); }
         item.append(where);
         li.append(item);
         const url = safeUrl(e.url);
@@ -275,7 +293,7 @@
     mode = "edit"; cur = i; resetForm(); returnTo = from || null;
     $("wish-title").textContent = "Modifier le souhait";
     $("wish-sub").textContent = "Les changements sont visibles par toute la famille.";
-    form.who.value = w.who; form.what.value = w.what; form.url.value = w.url || "";
+    form.who.value = w.who; form.what.value = w.what; form.url.value = w.url || ""; form.note.value = w.note || "";
     $("free").hidden = false; $("save").textContent = "Enregistrer";
     openOverlay("modal", form.what);
   }
@@ -283,6 +301,7 @@
     const w = wishes[i]; if (!w) return;
     cur = i;
     $("d-who").textContent = w.who; $("d-what").textContent = w.what;
+    $("d-note").textContent = w.note || ""; $("d-note").hidden = !w.note;
     const url = safeUrl(w.url);
     $("d-link").hidden = !url; $("d-nolink").hidden = !!url;
     if (url) $("d-link").href = url;
@@ -291,14 +310,14 @@
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const who = form.who.value.trim(), what = form.what.value.trim(), url = normalizeUrl(form.url.value);
+    const who = form.who.value.trim(), what = form.what.value.trim(), url = normalizeUrl(form.url.value), note = form.note.value.trim();
     if (!who) { $("wish-err").textContent = "Écris ton prénom."; form.who.focus(); return; }
     if (!what) { $("wish-err").textContent = "Écris le nom du cadeau."; form.what.focus(); return; }
     if (url && !/^https?:\/\/[^\s.]+\.[^\s]+$/i.test(url)) { $("wish-err").textContent = "Ce lien ne ressemble pas à une adresse web. Copie-le depuis la page de l'article."; form.url.focus(); return; }
     $("save").disabled = true; $("wish-err").textContent = "";
     try {
-      if (mode === "add") await api.add(cur, { who, what, url });
-      else await api.update(cur, { who, what, url });
+      if (mode === "add") await api.add(cur, { who, what, url, note });
+      else await api.update(cur, { who, what, url, note });
       store.set("mds-name", who);
       if (mode === "add" && !isOverflow(cur) && returnTo !== "list") flashSlot = cur;
       closeOverlays();
