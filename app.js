@@ -50,20 +50,26 @@
     save(d) { store.set("mds-demo", JSON.stringify(d)); },
   };
 
-  // Sends the "précisions" field. If the database has not been updated yet
-  // (supabase/2026-11-precisions.sql not run), saves the wish without it.
-  async function withNote(fn, args, note) {
-    try {
-      await rpc(fn, { ...args, p_note: note || null });
-    } catch (e) {
-      if (e.kind === "net" && /could not find the function|PGRST202/i.test(e.message)) {
-        await rpc(fn, args);
-        if (note) setTimeout(() => toast("Souhait enregistré, mais pas les précisions : la base doit être mise à jour.", true), 50);
+  // Saves a wish. If the database has not been updated yet (a supabase/2026-11-*.sql
+  // script not run), falls back to the older function and says what was not saved.
+  const missingFn = (e) => e.kind === "net" && /could not find the function|PGRST202/i.test(e.message);
+  async function saveWish(fn, args, note, more) {
+    const tries = [
+      [{ ...args, p_note: note || null, p_more_urls: more.length ? more : null }, ""],
+      [{ ...args, p_note: note || null }, more.length ? "les articles en plus" : ""],
+      [args, [note ? "les précisions" : "", more.length ? "les articles en plus" : ""].filter(Boolean).join(" ni ")],
+    ];
+    for (let t = 0; t < tries.length; t++) {
+      try {
+        await rpc(fn, tries[t][0]);
+        if (tries[t][1]) setTimeout(() => toast(`Souhait enregistré, mais pas ${tries[t][1]} : la base doit être mise à jour.`, true), 50);
         return;
+      } catch (e) {
+        if (!missingFn(e) || t === tries.length - 1) throw e;
       }
-      throw e;
     }
   }
+  const linksOf = (w) => [w.url, ...(w.more || [])].map(safeUrl).filter(Boolean);
 
   const api = {
     async check(c) { return DEMO ? true : rpc("check_family_code", { p_code: c }); },
@@ -71,16 +77,16 @@
       if (DEMO) return demo.load();
       const rows = await rpc("list_wishes", { p_code: code });
       const out = {};
-      for (const r of rows || []) out[r.slot] = { who: r.who, what: r.what, url: r.url, note: r.note || "", rank: r.rank ?? null };
+      for (const r of rows || []) out[r.slot] = { who: r.who, what: r.what, url: r.url, more: r.more_urls || [], note: r.note || "", rank: r.rank ?? null };
       return out;
     },
     async add(slot, w) {
       if (DEMO) { const d = demo.load(); if (d[slot]) throw Object.assign(new Error(), { kind: "taken" }); d[slot] = w; demo.save(d); return; }
-      await withNote("add_wish", { p_code: code, p_slot: slot, p_who: w.who, p_what: w.what, p_url: w.url || null }, w.note);
+      await saveWish("add_wish", { p_code: code, p_slot: slot, p_who: w.who, p_what: w.what, p_url: w.url || null }, w.note, w.more || []);
     },
     async update(slot, w) {
       if (DEMO) { const d = demo.load(); d[slot] = w; demo.save(d); return; }
-      await withNote("update_wish", { p_code: code, p_slot: slot, p_who: w.who, p_what: w.what, p_url: w.url || null }, w.note);
+      await saveWish("update_wish", { p_code: code, p_slot: slot, p_who: w.who, p_what: w.what, p_url: w.url || null }, w.note, w.more || []);
     },
     async reorder(slots) {
       if (DEMO) { const d = demo.load(); slots.forEach((sl, i) => { if (d[sl]) d[sl].rank = i + 1; }); demo.save(d); return; }
@@ -170,11 +176,11 @@
       let el;
       if (w) {
         taken++;
-        const url = safeUrl(w.url);
+        const links = linksOf(w), url = links.length === 1 ? links[0] : null;
         el = document.createElement(url && !touchOnly ? "a" : "button");
         if (el.tagName === "A") { el.href = url; el.target = "_blank"; el.rel = "noopener"; }
         else { el.type = "button"; el.addEventListener("click", () => openDetail(i)); }
-        el.setAttribute("aria-label", `${w.what}, souhaité par ${w.who}` + (url && !touchOnly ? ". Ouvrir l'article" : ""));
+        el.setAttribute("aria-label", `${w.what}, souhaité par ${w.who}` + (url && !touchOnly ? ". Ouvrir l'article" : links.length > 1 ? `. ${links.length} articles` : ""));
 
         const twine = document.createElement("span");
         twine.className = "twine"; twine.style.left = ax; twine.style.top = ky + "%";
@@ -185,7 +191,7 @@
         const rk = ranks[i];
         if (rk && rk.of > 1 && rk.pos === 1) { const st = document.createElement("span"); st.className = "star"; st.textContent = "★"; st.setAttribute("aria-hidden", "true"); who.prepend(st); }
         const what = document.createElement("span"); what.className = "what"; what.textContent = w.what;
-        const go = document.createElement("span"); go.className = "go"; go.textContent = url ? "Voir l'article ↗" : "Sans lien";
+        const go = document.createElement("span"); go.className = "go"; go.textContent = links.length > 1 ? `Voir les ${links.length} articles` : url ? "Voir l'article ↗" : "Sans lien";
         tag.append(who);
         if (rk && rk.of > 1) { const pr = document.createElement("span"); pr.className = "prio"; pr.textContent = `N°${rk.pos} sur ${rk.of}`; tag.append(pr); }
         tag.append(what);
@@ -279,11 +285,16 @@
         if (e.note) { const nt = document.createElement("span"); nt.className = "note"; nt.textContent = e.note; item.append(nt); }
         item.append(where);
         li.append(item);
-        const url = safeUrl(e.url);
-        if (url) {
-          const a = document.createElement("a"); a.className = "go"; a.href = url; a.target = "_blank"; a.rel = "noopener";
-          a.textContent = "Voir ↗"; a.setAttribute("aria-label", `Voir l'article : ${e.what}`);
-          li.append(a);
+        const links = linksOf(e);
+        if (links.length) {
+          const box = document.createElement("span"); box.className = "gos";
+          links.forEach((u, k) => {
+            const a = document.createElement("a"); a.className = "go"; a.href = u; a.target = "_blank"; a.rel = "noopener";
+            a.textContent = links.length > 1 ? `${k + 1} ↗` : "Voir ↗";
+            a.setAttribute("aria-label", links.length > 1 ? `Voir l'article ${k + 1} sur ${links.length} : ${e.what}` : `Voir l'article : ${e.what}`);
+            box.append(a);
+          });
+          li.append(box);
         }
         const ed = document.createElement("button"); ed.type = "button"; ed.className = "ed"; ed.innerHTML = PENCIL;
         ed.setAttribute("aria-label", `Modifier : ${e.what}`);
@@ -349,8 +360,37 @@
   // Wish form (add / edit)
   const form = $("wish");
   let mode = "add", cur = null;
+  const MAX_LINKS = 5;
+  function extraInputs() { return [...$("more-links").querySelectorAll("input")]; }
+  function syncLinkLabels() {
+    const n = extraInputs().length;
+    $("url-label").textContent = n ? "Article 1 : lien" : "Lien vers l'article";
+    extraInputs().forEach((inp, k) => {
+      inp.id = `url-${k + 2}`;
+      inp.closest(".link-row").querySelector(".lbl").textContent = `Article ${k + 2} : lien`;
+      inp.closest(".link-row").querySelector("label").htmlFor = inp.id;
+      inp.closest(".link-row").querySelector(".rm").setAttribute("aria-label", `Retirer l'article ${k + 2}`);
+    });
+    $("add-link").hidden = n + 1 >= MAX_LINKS;
+  }
+  function addLinkInput(value) {
+    const row = document.createElement("div"); row.className = "link-row";
+    const label = document.createElement("label");
+    const lbl = document.createElement("span"); lbl.className = "lbl";
+    const inp = document.createElement("input"); inp.type = "url"; inp.inputMode = "url"; inp.maxLength = 2000; inp.placeholder = "https://…";
+    inp.value = value || "";
+    label.append(lbl, inp);
+    const rm = document.createElement("button"); rm.type = "button"; rm.className = "rm"; rm.textContent = "×";
+    rm.addEventListener("click", () => { row.remove(); syncLinkLabels(); $("add-link").focus(); });
+    row.append(label, rm);
+    $("more-links").append(row);
+    syncLinkLabels();
+    return inp;
+  }
+  $("add-link").addEventListener("click", () => addLinkInput().focus());
   function resetForm() {
     form.reset(); $("wish-err").textContent = ""; $("confirm").hidden = true; $("save").disabled = false;
+    $("more-links").textContent = ""; syncLinkLabels();
   }
   function openAdd(i, from) {
     if (!DEMO && !code) return showGate();
@@ -369,6 +409,7 @@
     $("wish-title").textContent = "Modifier le souhait";
     $("wish-sub").textContent = "Les changements sont visibles par toute la famille.";
     form.who.value = w.who; form.what.value = w.what; form.url.value = w.url || ""; form.note.value = w.note || "";
+    (w.more || []).forEach((u) => addLinkInput(u));
     $("free").hidden = false; $("save").textContent = "Enregistrer";
     openOverlay("modal", form.what);
   }
@@ -378,22 +419,33 @@
     const rk = computeRanks()[i];
     $("d-who").textContent = w.who + (rk && rk.of > 1 ? ` · n°${rk.pos} sur ${rk.of}` : ""); $("d-what").textContent = w.what;
     $("d-note").textContent = w.note || ""; $("d-note").hidden = !w.note;
-    const url = safeUrl(w.url);
-    $("d-link").hidden = !url; $("d-nolink").hidden = !!url;
+    const links = linksOf(w), url = links.length === 1 ? links[0] : null;
+    $("d-link").hidden = !url; $("d-nolink").hidden = links.length > 0;
     if (url) $("d-link").href = url;
-    openOverlay("detail", url ? $("d-link") : $("d-close"));
+    const box = $("d-links"); box.textContent = ""; box.hidden = links.length < 2;
+    if (links.length > 1) links.forEach((u, k) => {
+      const a = document.createElement("a"); a.className = "primary btn"; a.href = u; a.target = "_blank"; a.rel = "noopener";
+      let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) { /* keep empty */ }
+      a.textContent = `Article ${k + 1}${host ? " · " + host : ""} ↗`;
+      box.append(a);
+    });
+    openOverlay("detail", url ? $("d-link") : links.length > 1 ? box.firstChild : $("d-close"));
   }
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const who = form.who.value.trim(), what = form.what.value.trim(), url = normalizeUrl(form.url.value), note = form.note.value.trim();
+    const who = form.who.value.trim(), what = form.what.value.trim(), note = form.note.value.trim();
+    const inputs = [form.url, ...extraInputs()];
+    const filled = inputs.map((inp) => ({ inp, u: normalizeUrl(inp.value) })).filter((x) => x.u);
+    const bad = filled.find((x) => !/^https?:\/\/[^\s.]+\.[^\s]+$/i.test(x.u));
+    const url = filled[0] ? filled[0].u : "", more = filled.slice(1).map((x) => x.u);
     if (!who) { $("wish-err").textContent = "Écris ton prénom."; form.who.focus(); return; }
     if (!what) { $("wish-err").textContent = "Écris le nom du cadeau."; form.what.focus(); return; }
-    if (url && !/^https?:\/\/[^\s.]+\.[^\s]+$/i.test(url)) { $("wish-err").textContent = "Ce lien ne ressemble pas à une adresse web. Copie-le depuis la page de l'article."; form.url.focus(); return; }
+    if (bad) { $("wish-err").textContent = "Ce lien ne ressemble pas à une adresse web. Copie-le depuis la page de l'article."; bad.inp.focus(); return; }
     $("save").disabled = true; $("wish-err").textContent = "";
     try {
-      if (mode === "add") await api.add(cur, { who, what, url, note });
-      else await api.update(cur, { who, what, url, note });
+      if (mode === "add") await api.add(cur, { who, what, url, more, note });
+      else await api.update(cur, { who, what, url, more, note });
       store.set("mds-name", who);
       if (mode === "add" && !isOverflow(cur) && returnTo !== "list") flashSlot = cur;
       closeOverlays();
