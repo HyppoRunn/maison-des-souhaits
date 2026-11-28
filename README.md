@@ -8,6 +8,7 @@ La liste de Noël de la famille, présentée comme un salon le soir de Noël. Ch
 - Chaque souhait peut être modifié ou supprimé (« Libérer ce cadeau »).
 - Champ facultatif « Précisions » (taille, couleur, modèle…), affiché au survol, dans la liste et sur la fiche du souhait.
 - « Liste des souhaits » affiche tous les souhaits classés par prénom, avec les liens.
+- Chacun classe ses souhaits par priorité avec ▲ ▼ dans la liste (n°1 = le plus voulu). Le n°1 porte une étoile sur son étiquette.
 - « Ajouter un souhait » prend le premier cadeau libre. Quand les 24 cadeaux du sapin sont pris, les souhaits suivants vont dans une hotte près de la cheminée (jusqu'à 200 souhaits au total).
 
 Sans Supabase configuré, le site tourne en **mode démo** : les souhaits restent dans le navigateur.
@@ -39,6 +40,8 @@ Dans le dépôt GitHub : **Settings › Pages**, source **Deploy from a branch**
 ## Mises à jour de la base
 
 Si la base a été créée avant l'ajout du champ « Précisions », lancer une fois [`supabase/2026-11-precisions.sql`](supabase/2026-11-precisions.sql) dans **SQL Editor**. Les souhaits et le code familial sont conservés. Tant que ce n'est pas fait, le site enregistre les souhaits sans les précisions et le signale.
+
+De même pour le classement par priorité : lancer une fois [`supabase/2026-11-priorites.sql`](supabase/2026-11-priorites.sql).
 
 ## Au quotidien
 

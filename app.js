@@ -71,7 +71,7 @@
       if (DEMO) return demo.load();
       const rows = await rpc("list_wishes", { p_code: code });
       const out = {};
-      for (const r of rows || []) out[r.slot] = { who: r.who, what: r.what, url: r.url, note: r.note || "" };
+      for (const r of rows || []) out[r.slot] = { who: r.who, what: r.what, url: r.url, note: r.note || "", rank: r.rank ?? null };
       return out;
     },
     async add(slot, w) {
@@ -81,6 +81,15 @@
     async update(slot, w) {
       if (DEMO) { const d = demo.load(); d[slot] = w; demo.save(d); return; }
       await withNote("update_wish", { p_code: code, p_slot: slot, p_who: w.who, p_what: w.what, p_url: w.url || null }, w.note);
+    },
+    async reorder(slots) {
+      if (DEMO) { const d = demo.load(); slots.forEach((sl, i) => { if (d[sl]) d[sl].rank = i + 1; }); demo.save(d); return; }
+      try {
+        await rpc("reorder_wishes", { p_code: code, p_slots: slots });
+      } catch (e) {
+        if (e.kind === "net" && /could not find the function|PGRST202/i.test(e.message)) e.kind = "old";
+        throw e;
+      }
     },
     async remove(slot) {
       if (DEMO) { const d = demo.load(); delete d[slot]; demo.save(d); return; }
@@ -102,11 +111,49 @@
   /* ---------------- Rendering ---------------- */
   const PENCIL = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M11.7 1.3a1.5 1.5 0 0 1 2.1 0l.9.9a1.5 1.5 0 0 1 0 2.1L5.6 13.4 2 14l.6-3.6z"/></svg>';
 
+  /* ---------------- Priority ranking (per person) ---------------- */
+  const personKey = (who) => (who || "").trim().toLocaleLowerCase("fr");
+  const byPriority = (a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || a.slot - b.slot;
+  function groupSlots(key) {
+    return Object.entries(wishes).map(([slot, w]) => ({ slot: +slot, ...w }))
+      .filter((e) => personKey(e.who) === key).sort(byPriority).map((e) => e.slot);
+  }
+  function computeRanks() {
+    const out = {}, seen = new Set();
+    for (const w of Object.values(wishes)) {
+      const key = personKey(w.who); if (seen.has(key)) continue; seen.add(key);
+      const slots = groupSlots(key);
+      slots.forEach((sl, i) => { out[sl] = { pos: i + 1, of: slots.length }; });
+    }
+    return out;
+  }
+  const pendingOrder = {};
+  function move(slot, dir) {
+    const key = personKey(wishes[slot].who);
+    const slots = groupSlots(key);
+    const i = slots.indexOf(slot), j = i + dir;
+    if (j < 0 || j >= slots.length) return;
+    [slots[i], slots[j]] = [slots[j], slots[i]];
+    slots.forEach((sl, k) => { wishes[sl].rank = k + 1; });
+    render();
+    focusMove(slot, dir);
+    clearTimeout(pendingOrder[key]);
+    pendingOrder[key] = setTimeout(async () => {
+      try { await api.reorder(groupSlots(key)); }
+      catch (e) {
+        if (e.kind === "old") toast("Le classement n'est pas enregistré : la base doit être mise à jour.", true);
+        else if (e.kind === "code") { logout(); showGate(); }
+        else toast("Impossible d'enregistrer le classement. Réessaie.", true);
+      } finally { delete pendingOrder[key]; if (!Object.keys(pendingOrder).length) refresh(true); }
+    }, 700);
+  }
+
   function render() {
     const hits = $("hits");
     hits.textContent = "";
     const total = SCENE.gifts.length;
     let taken = 0;
+    const ranks = computeRanks();
     // Tags keep the same size relative to the gifts whatever the scene width
     const k = Math.min(1, Math.max(0.6, ($("hits").clientWidth || 1300) / 1300));
     SCENE.gifts.forEach((g, i) => {
@@ -135,9 +182,13 @@
         tag.className = "tag"; tag.style.left = ax; tag.style.top = `calc(${ky}% + ${(7 * sz).toFixed(1)}px)`;
         tag.style.setProperty("--rot", (i % 2 ? 5 : -5) + "deg"); tag.style.animationDelay = -(i * 0.7) + "s";
         const who = document.createElement("span"); who.className = "who"; who.textContent = w.who;
+        const rk = ranks[i];
+        if (rk && rk.of > 1 && rk.pos === 1) { const st = document.createElement("span"); st.className = "star"; st.textContent = "★"; st.setAttribute("aria-hidden", "true"); who.prepend(st); }
         const what = document.createElement("span"); what.className = "what"; what.textContent = w.what;
         const go = document.createElement("span"); go.className = "go"; go.textContent = url ? "Voir l'article ↗" : "Sans lien";
-        tag.append(who, what);
+        tag.append(who);
+        if (rk && rk.of > 1) { const pr = document.createElement("span"); pr.className = "prio"; pr.textContent = `N°${rk.pos} sur ${rk.of}`; tag.append(pr); }
+        tag.append(what);
         if (w.note) { const nt = document.createElement("span"); nt.className = "note"; nt.textContent = w.note; tag.append(nt); }
         tag.append(go);
         el.append(twine, tag);
@@ -185,13 +236,20 @@
   }
   const isOverflow = (i) => i >= SCENE.gifts.length;
 
+  function focusMove(slot, dir) {
+    const q = (d) => $("list-body").querySelector(`[data-slot="${slot}"][data-dir="${d}"]:not(:disabled)`);
+    const btn = q(dir) || q(-dir);
+    if (btn) btn.focus();
+  }
   function renderList() {
     const body = $("list-body");
+    const act = document.activeElement;
+    const keep = act && body.contains(act) && act.dataset.slot ? { slot: act.dataset.slot, dir: +act.dataset.dir } : null;
     body.textContent = "";
     const entries = Object.entries(wishes).map(([slot, w]) => ({ slot: +slot, ...w }));
     const n = entries.length;
     $("list-sub").textContent = n
-      ? `${n} souhait${n > 1 ? "s" : ""}, classés par prénom.`
+      ? `${n} souhait${n > 1 ? "s" : ""}, classés par prénom. Range les tiens avec ▲ ▼ : le n°1 est celui que tu veux le plus.`
       : "";
     if (!n) {
       const p = document.createElement("p"); p.className = "list-empty";
@@ -210,8 +268,11 @@
       const c = document.createElement("small"); c.textContent = `${g.items.length} souhait${g.items.length > 1 ? "s" : ""}`;
       h.append(c);
       const ul = document.createElement("ul");
-      g.items.sort((a, b) => a.slot - b.slot).forEach((e) => {
+      g.items.sort(byPriority).forEach((e, idx, arr) => {
         const li = document.createElement("li");
+        const num = document.createElement("span"); num.className = "num" + (idx === 0 && arr.length > 1 ? " first" : ""); num.textContent = idx + 1;
+        num.setAttribute("aria-label", `Priorité ${idx + 1}`);
+        li.append(num);
         const item = document.createElement("span"); item.className = "item"; item.textContent = e.what;
         const where = document.createElement("span"); where.className = "where";
         where.textContent = isOverflow(e.slot) ? "Dans la hotte" : "Sous le sapin";
@@ -228,11 +289,24 @@
         ed.setAttribute("aria-label", `Modifier : ${e.what}`);
         ed.addEventListener("click", () => openEdit(e.slot, "list"));
         li.append(ed);
+        if (arr.length > 1) {
+          const mv = document.createElement("span"); mv.className = "move";
+          for (const [dir, label, sym] of [[-1, "Monter", "▲"], [1, "Descendre", "▼"]]) {
+            const b = document.createElement("button"); b.type = "button"; b.textContent = sym;
+            b.dataset.slot = e.slot; b.dataset.dir = dir;
+            b.setAttribute("aria-label", `${label} : ${e.what}`);
+            b.disabled = dir < 0 ? idx === 0 : idx === arr.length - 1;
+            b.addEventListener("click", () => move(e.slot, dir));
+            mv.append(b);
+          }
+          li.prepend(mv);
+        }
         ul.append(li);
       });
       sec.append(h, ul);
       body.append(sec);
     });
+    if (keep) focusMove(keep.slot, keep.dir);
   }
   function openList() {
     if (!DEMO && !code) return showGate();
@@ -248,6 +322,7 @@
 
   async function refresh(quiet) {
     if (!DEMO && !code) return;
+    if (Object.keys(pendingOrder).length) return; // a ranking is being saved
     try {
       wishes = await api.list();
       render();
@@ -300,7 +375,8 @@
   function openDetail(i) {
     const w = wishes[i]; if (!w) return;
     cur = i;
-    $("d-who").textContent = w.who; $("d-what").textContent = w.what;
+    const rk = computeRanks()[i];
+    $("d-who").textContent = w.who + (rk && rk.of > 1 ? ` · n°${rk.pos} sur ${rk.of}` : ""); $("d-what").textContent = w.what;
     $("d-note").textContent = w.note || ""; $("d-note").hidden = !w.note;
     const url = safeUrl(w.url);
     $("d-link").hidden = !url; $("d-nolink").hidden = !!url;
